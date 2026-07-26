@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { generateAccountNumber } from "./utils";
+import { createJWT, verifyJWT } from "./jwt";
 
 const SESSION_COOKIE = "banking_session";
 
@@ -20,13 +21,10 @@ export async function verifyPassword(
 
 export async function createSession(userId: string): Promise<void> {
   const cookieStore = await cookies();
-  // Simple session: store userId in a cookie (in production, use signed JWT/session tokens)
-  const sessionToken = Buffer.from(
-    JSON.stringify({ userId, ts: Date.now() })
-  ).toString("base64");
-  cookieStore.set(SESSION_COOKIE, sessionToken, {
+  const token = createJWT(userId, 7); // 7 day expiration
+  cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: false,
+    secure: process.env.NODE_ENV === "production", // Only secure in production
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 days
@@ -37,13 +35,11 @@ export async function getSession(): Promise<{ userId: string } | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  try {
-    const decoded = JSON.parse(Buffer.from(token, "base64").toString("utf-8"));
-    if (decoded.userId) return { userId: decoded.userId };
-    return null;
-  } catch {
-    return null;
-  }
+  
+  const payload = verifyJWT(token);
+  if (!payload) return null;
+  
+  return { userId: payload.userId };
 }
 
 export async function destroySession(): Promise<void> {
